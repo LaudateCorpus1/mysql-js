@@ -68,7 +68,7 @@ ScanOperation::ScanOperation(const Arguments &args) :
   DEBUG_MARKER(UDEB_DEBUG);
 
   Local<Value> v;
-
+  Local<Context> context = args.GetIsolate()->GetCurrentContext();
   const Local<Object> spec = args[0]->ToObject();
   opcode = args[1]->Int32Value();
   ctx = unwrapPointer<TransactionImpl *>(args[2]->ToObject());
@@ -102,7 +102,7 @@ ScanOperation::ScanOperation(const Arguments &args) :
   v = spec->Get(SCAN_BOUNDS);
   if(v->IsArray()) {
     Local<Object> o = v->ToObject();
-    while(o->Has(nbounds)) {
+    while(o->Has(context, nbounds).ToChecked()) {
       nbounds++; 
     }
     DEBUG_PRINT("Index Scan with %d IndexBounds", nbounds);

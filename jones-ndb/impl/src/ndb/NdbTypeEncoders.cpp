@@ -77,6 +77,8 @@ Eternal<Value>   /* SQLState Error Codes */
 
 Isolate * isolate;
 
+Local<Context> js_context() { return isolate->GetCurrentContext(); }
+
 #define ENCODER(A, B, C) NdbTypeEncoder A = { & B, & C, 0 }
 
 #define DECLARE_ENCODER(TYPE) \
@@ -490,7 +492,8 @@ Local<Value> IntWriter(const NdbDictionary::Column * col,
     status = writerOK;
   }
   else {
-    double dval = value->ToNumber()->Value();
+    Local<Number> result = value->ToNumber(js_context()).ToLocalChecked();
+    double dval = result->Value();
     *ipos = static_cast<int>(rint(dval));
     status = checkNumber<int>(dval);
   }
@@ -514,7 +517,8 @@ Local<Value> UnsignedIntWriter(const NdbDictionary::Column * col,
     *ipos = value->Uint32Value();
     status = writerOK;
   } else {
-    double dval = value->ToNumber()->Value();
+    Local<Number> result = value->ToNumber(js_context()).ToLocalChecked();
+    double dval = result->Value();
     *ipos = static_cast<uint32_t>(rint(dval));
     status = checkNumber<uint32_t>(dval);
   }
@@ -541,7 +545,8 @@ Local<Value> smallintWriter(const NdbDictionary::Column * col,
     *ipos = static_cast<INTSZ>(ival);
     status = checkIntValue<INTSZ>(ival) ? writerOK : K_22003_OutOfRange.Get(isolate);
   } else {
-    double dval = value->ToNumber()->Value();
+    Local<Number> result = value->ToNumber(js_context()).ToLocalChecked();
+    double dval = result->Value();
     *ipos = static_cast<INTSZ>(dval);
     status = getStatusForValue<INTSZ>(dval);
   }
@@ -567,7 +572,8 @@ Local<Value> MediumWriter(const NdbDictionary::Column * col,
     chkv = value->Int32Value();
     status = checkMedium(chkv);
   } else {
-    dval = value->ToNumber()->Value();
+    Local<Number> result = value->ToNumber(js_context()).ToLocalChecked();
+    dval = result->Value();
     chkv = static_cast<int>(rint(dval));
     status = getStatusForMedium(dval);
   }
@@ -594,7 +600,8 @@ Local<Value> MediumUnsignedWriter(const NdbDictionary::Column * col,
     chkv = value->Int32Value();
     status = checkUnsignedMedium(chkv);
   } else {
-    dval = value->ToNumber()->Value();
+    Local<Number> result = value->ToNumber(js_context()).ToLocalChecked();
+    dval = result->Value();
     chkv = static_cast<int>(rint(dval));
     status = getStatusForUnsignedMedium(dval);
   }
@@ -714,7 +721,8 @@ Local<Value> DecimalWriter(const NdbDictionary::Column *col,
 Local<Value> UnsignedDecimalWriter(const NdbDictionary::Column *col,
                                     Handle<Value> value, char *buffer, 
                                     uint32_t offset) {
-  return value->NumberValue() >= 0 ?
+  double result = value->NumberValue(js_context()).ToChecked();
+  return result >= 0 ?
     DecimalWriter(col, value, buffer, offset) :
     K_22003_OutOfRange.Get(isolate);
 }
@@ -732,7 +740,7 @@ template<typename FPT>
 Local<Value> fpWriter(const NdbDictionary::Column * col,
                        Handle<Value> value, 
                        char *buffer, uint32_t offset) {
-  double dval = value->ToNumber()->NumberValue();
+  double dval = value->NumberValue(js_context()).ToChecked();
   bool valid = isfinite(dval);
   if(valid) {
     STORE_ALIGNED_DATA(FPT, dval, buffer+offset);
@@ -1057,20 +1065,20 @@ Local<String> getTextFromBuffer(const NdbDictionary::Column *col,
   uint32_t len = node::Buffer::Length(bufferObj);
   char * str = node::Buffer::Data(bufferObj);
 
-  Local<String> string;
+  MaybeLocal<String> string;
   
   // We won't call stringIsAscii() on a whole big TEXT buffer...
   if(csinfo->isAscii) {
     stats.read_strings_externalized++;
     ExternalizedAsciiString *ext = new ExternalizedAsciiString(str, len);
     ext->ref.Reset(isolate, bufferObj);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalOneByte(isolate, ext);
   } else if (csinfo->isUtf16le) {
     stats.read_strings_externalized++;
     uint16_t * buf = (uint16_t *) str;
     ExternalizedUnicodeString * ext = new ExternalizedUnicodeString(buf, len/2);
     ext->ref.Reset(isolate, bufferObj);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalTwoByte(isolate, ext);
   } else {
     stats.read_strings_created++;
     if (csinfo->isUtf8) {
@@ -1093,7 +1101,7 @@ Local<String> getTextFromBuffer(const NdbDictionary::Column *col,
       delete[] recode_buffer;
     }
   }
-  return string;
+  return string.ToLocalChecked();
 }  
 
 // CHAR
@@ -1101,7 +1109,7 @@ Local<String> getTextFromBuffer(const NdbDictionary::Column *col,
 Local<Value> CharReader(const NdbDictionary::Column *col, 
                          char *buffer, uint32_t offset) {
   char * str = buffer+offset;
-  Local<String> string;
+  MaybeLocal<String> string;
   int len = col->getLength();
   const EncoderCharset * csinfo = getEncoderCharsetForColumn(col);
 
@@ -1111,7 +1119,7 @@ Local<Value> CharReader(const NdbDictionary::Column *col,
     while(str[--len] == ' ') ;  // skip past space padding
     len++;  // undo 1 place
     ExternalizedAsciiString *ext = new ExternalizedAsciiString(str, len);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalOneByte(isolate, ext);
     //DEBUG_PRINT("(A): External ASCII");
   }
   else if(csinfo->isUtf16le) {
@@ -1120,7 +1128,7 @@ Local<Value> CharReader(const NdbDictionary::Column *col,
     uint16_t * buf = (uint16_t *) str;
     while(buf[--len] == ' ') {}; len++;  // skip padding, then undo 1
     ExternalizedUnicodeString * ext = new ExternalizedUnicodeString(buf, len);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalTwoByte(isolate, ext);
     //DEBUG_PRINT("(B): External UTF-16-LE");
   }
   else if(csinfo->isUtf8) {
@@ -1155,7 +1163,7 @@ Local<Value> CharReader(const NdbDictionary::Column *col,
     //DEBUG_PRINT("(D.2): Recode to UTF-8 and create new");
   }
 
-  return string;
+  return string.ToLocalChecked();
 }
 
 Local<Value> CharWriter(const NdbDictionary::Column * col,
@@ -1173,21 +1181,21 @@ Local<Value> varcharReader(const NdbDictionary::Column *col,
                             char *buffer, uint32_t offset) {
   LOAD_ALIGNED_DATA(LENGTHTYPE, length, buffer+offset);
   char * str = buffer+offset+sizeof(length);
-  Local<String> string;
+  MaybeLocal<String> string;
   const EncoderCharset * csinfo = getEncoderCharsetForColumn(col);
 
   if(csinfo->isAscii || 
      (! csinfo->isMultibyte && stringIsAscii((const unsigned char *) str, length))) {
     stats.read_strings_externalized++;
     ExternalizedAsciiString *ext = new ExternalizedAsciiString(str, length);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalOneByte(isolate, ext);
     //DEBUG_PRINT("(A): External ASCII [size %d]", length);
   }
   else if(csinfo->isUtf16le) {
     stats.read_strings_externalized++;
     uint16_t * buf = (uint16_t *) str;
     ExternalizedUnicodeString * ext = new ExternalizedUnicodeString(buf, length/2);
-    string = String::NewExternal(isolate, ext);
+    string = String::NewExternalTwoByte(isolate, ext);
     //DEBUG_PRINT("(B): External UTF-16-LE [size %d]", length);
   }
   else if(csinfo->isUtf8) {
@@ -1211,7 +1219,7 @@ Local<Value> varcharReader(const NdbDictionary::Column *col,
     delete[] recode_buffer;
     //DEBUG_PRINT("(D.2): Recode to UTF-8 and create new [size %d]", length);
   }
-  return string;
+  return string.ToLocalChecked();
 }
 
 template<typename LENGTHTYPE>
@@ -1485,7 +1493,7 @@ Local<Value> YearWriter(const NdbDictionary::Column * col,
   if(value->IsInt32()) {
     chkv = value->Int32Value();
   } else {
-    double dval = value->ToNumber()->Value();
+    double dval = value->NumberValue(js_context()).ToChecked();
     chkv = static_cast<int>(rint(dval));
   }
 

@@ -142,6 +142,7 @@ void nroGetFieldByNumber(const Arguments &args) {
 void nroConstructor(const Arguments &args) {
   DEBUG_MARKER(UDEB_DEBUG);
   EscapableHandleScope scope(args.GetIsolate());
+  Local<v8::Context> context = args.GetIsolate()->GetCurrentContext();
 
   /* Unwrap record from mapData */
   Local<Object> mapData = args.Data()->ToObject();
@@ -166,7 +167,7 @@ void nroConstructor(const Arguments &args) {
   /* Set Prototype */
   Handle<Value> prototype = mapData->Get(3);
   if(! prototype->IsNull())
-    jsRecordObject->ToObject()->SetPrototype(prototype);
+    jsRecordObject->ToObject()->SetPrototype(context, prototype).ToChecked();
 
   args.GetReturnValue().Set(scope.Escape(jsRecordObject));
 }
